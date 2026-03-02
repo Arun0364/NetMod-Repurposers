@@ -8,7 +8,7 @@
 - Regularly pull changes from the main branch to keep branch up to date.
 - Use pull requests to propose changes and get feedback from other contributors.
 
-### To contribute to the NetMod-Repurposers project, follow these steps:
+### *To contribute to the NetMod-Repurposers project, follow these steps:*
 1. Fork the repo to your GitHub Account.
 2. Clone the forked repo to your local machine.
 3. Create a new branch for your changes.
@@ -19,7 +19,7 @@
 8. Once your pull request is approved, it will be merged into the main branch.
 9. After your changes are merged, you can delete your branch to keep the repository clean.
 
-### Some useful Git commands:
+### *Some useful Git commands:*
 - `git clone <repo-url>`: Clone a repository to your local machine.
 - `git checkout -b <branch-name>`: Create and switch to a new branch.
 - `git add <file>`: Stage changes for commit.
