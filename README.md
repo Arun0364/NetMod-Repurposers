@@ -6,6 +6,7 @@ A repository for FOB project
 # GitHub tips!!
 
 **Try to learn GitHub if you haven't used it before.**
+**And please use VS Code for coding and git commonds**
 
 ### *Some tips to keep in mind:*
 - Always create a new branch for changes, so that the main branch remains stable.
