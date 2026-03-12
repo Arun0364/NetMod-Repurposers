@@ -1,0 +1,4 @@
+gene,min_pvalue,max_pvalue_mlog,n_snps,has_functional_snp
+FAN1,2E-20,19.698970004336,1,1
+LINC01337,1E-10,10.0,1,0
+CRPPA,2E-08,7.69897000433602,1,0
