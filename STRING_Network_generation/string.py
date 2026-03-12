@@ -3,13 +3,15 @@ import requests
 import networkx as nx
 
 # ==========================
-# PARAMETERS (CHAT PLSSSS EDIT THESE)
+# PARAMETERS
 # ==========================
 
-GENE_FILE = "disease_genes.csv"   # file containing gene symbols
-GENE_COLUMN = "symbol"            # column name containing gene symbols
-SPECIES_ID = 9606                 # human
-CONFIDENCE_SCORE = 700            # STRING high-confidence interactions
+GENE_FILE ='use your path name chat'
+#main change (from symbol to gene)
+GENE_COLUMN = "gene"
+
+SPECIES_ID = 9606
+CONFIDENCE_SCORE = 700
 
 # ==========================
 # STEP 1: LOAD GENE LIST
@@ -25,13 +27,15 @@ print(f"Number of genes loaded: {len(gene_list)}")
 # STEP 2: QUERY STRING API
 # ==========================
 
+print("Querying STRING database...")
+
 string_api_url = "https://string-db.org/api"
 output_format = "tsv"
 method = "network"
 
-genes_str = "%0d".join(gene_list)
-
 request_url = "/".join([string_api_url, output_format, method])
+
+genes_str = "%0d".join(gene_list)
 
 params = {
     "identifiers": genes_str,
@@ -39,18 +43,15 @@ params = {
     "required_score": CONFIDENCE_SCORE
 }
 
-print("Querying STRING database...")
-
 response = requests.post(request_url, data=params)
 
 if response.status_code != 200:
     raise Exception("STRING API request failed")
 
-# Save raw interaction data
 with open("string_interactions.tsv", "w") as f:
     f.write(response.text)
 
-print("STRING interactions saved.")
+print("STRING interactions saved")
 
 # ==========================
 # STEP 3: LOAD INTERACTIONS
@@ -70,8 +71,8 @@ G = nx.from_pandas_edgelist(
     target="preferredName_B"
 )
 
-print(f"Total nodes in network: {G.number_of_nodes()}")
-print(f"Total edges in network: {G.number_of_edges()}")
+print("Total nodes:", G.number_of_nodes())
+print("Total edges:", G.number_of_edges())
 
 # ==========================
 # STEP 5: EXTRACT DISEASE SUBNETWORK
@@ -79,15 +80,22 @@ print(f"Total edges in network: {G.number_of_edges()}")
 
 disease_genes = set(gene_list)
 
-sub_nodes = [
-    node for node in G.nodes()
-    if node in disease_genes
-]
+sub_nodes = set()
+
+for gene in disease_genes:
+    
+    if gene in G:
+        
+        sub_nodes.add(gene)
+        
+        neighbors = list(G.neighbors(gene))
+        
+        sub_nodes.update(neighbors)
 
 disease_network = G.subgraph(sub_nodes)
 
-print(f"Disease subnetwork nodes: {disease_network.number_of_nodes()}")
-print(f"Disease subnetwork edges: {disease_network.number_of_edges()}")
+print("Disease subnetwork nodes:", disease_network.number_of_nodes())
+print("Disease subnetwork edges:", disease_network.number_of_edges())
 
 # ==========================
 # STEP 6: SAVE NETWORK
