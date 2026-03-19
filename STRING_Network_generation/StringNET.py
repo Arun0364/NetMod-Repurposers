@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 # PARAMETERS
 # ==========================
 DISEASE = "CardioVascularDisease"  # name of disease for files
-GENE_FILE = # add own path chat
+GENE_FILE = "/Users/vineetpaliwal/Downloads/top_300_genes_CardioVascularDisease.csv"
 GENE_COLUMN = "gene"
 SPECIES_ID = 9606
 CONFIDENCE_SCORE = 700
