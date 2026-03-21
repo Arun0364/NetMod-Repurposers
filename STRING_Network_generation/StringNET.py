@@ -6,8 +6,8 @@ import matplotlib.pyplot as plt
 # ==========================
 # PARAMETERS
 # ==========================
-DISEASE = "CardioVascularDisease"  # name of disease for files
-GENE_FILE = "/Users/vineetpaliwal/Downloads/top_300_genes_CardioVascularDisease.csv"
+DISEASE = "DISEASE_NAME"  # name of disease for files
+GENE_FILE = "(FILENAME)"  # input gene list file
 GENE_COLUMN = "gene"
 SPECIES_ID = 9606
 CONFIDENCE_SCORE = 700
