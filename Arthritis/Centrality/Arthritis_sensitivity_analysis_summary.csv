@@ -1,0 +1,2 @@
+confidence,resolution,nodes_full_graph,edges_full_graph,nodes_largest_component,edges_largest_component,num_communities,top_10_hubs
+700,1.0,81,223,57,186,5,"EP300, HLA-A, STAT4, IL10, HLA-B, HLA-DRB1, PTPN22, HLA-DQA1, PSMB9, HLA-DRA"
