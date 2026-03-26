@@ -1,0 +1,2 @@
+confidence,resolution,nodes_full_graph,edges_full_graph,nodes_largest_component,edges_largest_component,num_communities,top_10_hubs
+700,1.0,78,145,66,135,7,"TCF7L2, KCNJ11, CDKN2A, IGF2BP2, CDKAL1, ADCY5, MTNR1B, SLC30A8, PPARG, GCK"
