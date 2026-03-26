@@ -7,8 +7,8 @@ import matplotlib.pyplot as plt
 from io import StringIO
 
 
-DISEASE = "Arthritis"
-GENE_FILE = "/Users/arun/Desktop/02604/Project/NetMod-Repurposers/Filtered_Genes/Copy of top_300_genes_arthritis.csv"
+DISEASE = {} #[DISEASE_NAME]
+GENE_FILE = {} #[GENE_FILE_PATH]
 GENE_COLUMN = "gene"
 
 SPECIES_ID = 9606
