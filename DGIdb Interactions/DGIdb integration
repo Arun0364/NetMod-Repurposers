@@ -1,0 +1,388 @@
+import pandas as pd
+import numpy as np
+from pathlib import Path
+
+
+# standardize gene symbols
+
+def standardize_gene_series(s):
+    return (
+        s.astype(str)              
+        .str.upper()               
+        .str.strip()               
+        .replace({"": np.nan, "NAN": np.nan, "NONE": np.nan})  
+    )
+
+
+
+#  min-max normalization - our ranking combines several features with different scales e.g. number of hubs targeted may be 0-10, while centrality sum may be 0-3
+# - min-max scales all values to 0-1 before combining
+
+def minmax(series):
+    series = series.fillna(0)
+
+    # if all values are the same, avoid division-by-zero
+    if series.nunique() <= 1:
+        return pd.Series(np.zeros(len(series)), index=series.index)
+
+    return (series - series.min()) / (series.max() - series.min())
+
+
+# ------------------------------------------------------------
+# Load disease-specific gene metrics file
+# Input:
+#   your output from previous step:
+#   e.g. Cardiovascular_Disease_gene_metrics_conf700_res1.0.csv
+#
+# Expected columns:
+#   gene, community, degree, betweenness, closeness, combined_score
+#
+# What this function does:
+# - reads the file
+# - checks required columns
+# - standardizes gene symbols
+# - removes duplicates
+# - defines "hub genes" as top 20% by combined centrality score
+# ------------------------------------------------------------
+def load_gene_metrics(gene_metrics_file, gene_col="gene"):
+    df = pd.read_csv(gene_metrics_file)
+
+    required = [gene_col, "community", "degree", "betweenness", "closeness", "combined_score"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns in gene_metrics file: {missing}")
+
+    df = df.copy()
+
+    # standardize gene symbols
+    df[gene_col] = standardize_gene_series(df[gene_col])
+
+    # remove rows with missing gene names and drop duplicates
+    df = df.dropna(subset=[gene_col]).drop_duplicates(subset=[gene_col])
+
+    # define hubs = genes in top 20% of combined centrality
+    hub_threshold = df["combined_score"].quantile(0.80)
+    df["is_hub"] = (df["combined_score"] >= hub_threshold).astype(int)
+
+    return df
+
+
+# ------------------------------------------------------------
+# Load DGIdb interactions file
+# Input:
+#   interactions.tsv file downloaded from DGIdb
+#
+# What this function does:
+# - reads the DGIdb interaction file
+# - handles possible variation in column names across DGIdb versions
+# - creates standardized columns:
+#     gene
+#     drug
+#     interaction_type
+#     interaction_score
+# - keeps extra metadata if present (sources, PMIDs, etc.)
+# ------------------------------------------------------------
+def load_dgidb_interactions(interactions_file):
+    dgidb = pd.read_csv(interactions_file, sep="\t", low_memory=False)
+
+    # clean column names
+    dgidb.columns = [c.strip() for c in dgidb.columns]
+
+    # DGIdb versions may use slightly different names
+    gene_candidates = ["gene_name", "gene_claim_name", "entrez_gene_symbol"]
+    drug_candidates = ["drug_name", "drug_claim_name"]
+    interaction_candidates = ["interaction_types", "interaction_type"]
+    score_candidates = ["interaction_score", "score"]
+
+    # pick the first matching column name found
+    gene_col = next((c for c in gene_candidates if c in dgidb.columns), None)
+    drug_col = next((c for c in drug_candidates if c in dgidb.columns), None)
+    interaction_col = next((c for c in interaction_candidates if c in dgidb.columns), None)
+    score_col = next((c for c in score_candidates if c in dgidb.columns), None)
+
+    # if we cannot identify gene or drug columns, stop
+    if gene_col is None or drug_col is None:
+        raise ValueError(
+            f"Could not identify DGIdb gene/drug columns. Found columns: {list(dgidb.columns)[:20]}"
+        )
+
+    dgidb = dgidb.copy()
+
+    # standardize core fields
+    dgidb["gene"] = standardize_gene_series(dgidb[gene_col])
+    dgidb["drug"] = dgidb[drug_col].astype(str).str.strip()
+
+    # interaction type is useful but not always required
+    if interaction_col:
+        dgidb["interaction_type"] = dgidb[interaction_col].astype(str).str.strip()
+    else:
+        dgidb["interaction_type"] = np.nan
+
+    # interaction score is helpful for optional filtering
+    if score_col:
+        dgidb["interaction_score"] = pd.to_numeric(dgidb[score_col], errors="coerce")
+    else:
+        dgidb["interaction_score"] = np.nan
+
+    # keep a minimal but useful set of columns
+    keep_cols = ["gene", "drug", "interaction_type", "interaction_score"]
+
+    # retain useful metadata if present
+    extra_cols = [
+        c for c in ["sources", "source_trust_levels", "pmids", "drug_concept_id", "gene_concept_id"]
+        if c in dgidb.columns
+    ]
+    keep_cols += extra_cols
+
+    dgidb = dgidb[keep_cols]
+
+    # remove invalid rows and duplicates
+    dgidb = dgidb.dropna(subset=["gene", "drug"])
+    dgidb = dgidb.drop_duplicates()
+
+    return dgidb
+
+
+# ------------------------------------------------------------
+# Build disease-specific drug-gene interaction table
+#
+# What this function does:
+# - keeps only DGIdb interactions whose target genes are present
+#   in your disease network
+# - optionally filters by minimum DGIdb interaction score
+# - merges DGIdb data with centrality/community info
+#
+# Output:
+#   one row per relevant (drug, gene) pair, with:
+#   drug info + gene centrality + community + hub flag
+# ------------------------------------------------------------
+def prepare_drug_gene_interactions(gene_metrics_df, dgidb_df, min_interaction_score=None):
+    # genes present in your disease network
+    network_genes = set(gene_metrics_df["gene"])
+
+    # keep only interactions where the target gene is in the network
+    drug_gene = dgidb_df[dgidb_df["gene"].isin(network_genes)].copy()
+
+    # optional filtering by DGIdb interaction score
+    if min_interaction_score is not None and "interaction_score" in drug_gene.columns:
+        drug_gene = drug_gene[
+            drug_gene["interaction_score"].isna() |
+            (drug_gene["interaction_score"] >= min_interaction_score)
+        ].copy()
+
+    # keep only one row per unique drug-gene pair
+    drug_gene = drug_gene.drop_duplicates(subset=["drug", "gene"])
+
+    # merge in centrality + community + is_hub
+    drug_gene = drug_gene.merge(
+        gene_metrics_df,
+        on="gene",
+        how="inner"
+    )
+
+    return drug_gene
+
+
+# ------------------------------------------------------------
+# Compute drug-to-module coverage
+#
+# Why:
+# - Louvain gives you modules/communities
+# - we want to know whether a drug hits genes in one or multiple modules
+# - and what fraction of a module it covers
+#
+# Output 1: module_cov
+#   one row per drug with summary statistics
+#
+# Output 2: drug_module_hits
+#   one row per (drug, community) pair with module coverage details
+# ------------------------------------------------------------
+def compute_module_coverage(drug_gene_df, gene_metrics_df):
+    # size of each module in the disease network
+    module_sizes = (
+        gene_metrics_df.groupby("community")["gene"]
+        .nunique()
+        .reset_index(name="module_size")
+    )
+
+    # count how many genes each drug hits in each module
+    drug_module_hits = (
+        drug_gene_df.groupby(["drug", "community"])["gene"]
+        .nunique()
+        .reset_index(name="targets_in_module")
+        .merge(module_sizes, on="community", how="left")
+    )
+
+    # fraction of each module covered by a drug
+    drug_module_hits["module_coverage"] = (
+        drug_module_hits["targets_in_module"] / drug_module_hits["module_size"]
+    )
+
+    # summarize module coverage per drug
+    module_cov = (
+        drug_module_hits.groupby("drug")
+        .agg(
+            n_communities_hit=("community", "nunique"),
+            max_module_coverage=("module_coverage", "max"),
+            mean_module_coverage=("module_coverage", "mean")
+        )
+        .reset_index()
+    )
+
+    return module_cov, drug_module_hits
+
+
+# ------------------------------------------------------------
+# Score drugs
+#
+# What this function does:
+# - aggregates all drug-gene rows into one row per drug
+# - computes network-based features:
+#     n_targets_in_network
+#     n_hub_targets
+#     sum / mean / max centrality
+#     number of communities hit
+#     module coverage
+# - normalizes these features
+# - combines them into one composite drug_score
+#
+# Returns:
+#   drug_scores_df      -> ranked drugs
+#   drug_module_hits_df -> drug-module details
+# ------------------------------------------------------------
+def score_drugs(drug_gene_df, gene_metrics_df):
+    if drug_gene_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
+
+    # compute module-level drug coverage features
+    module_cov, drug_module_hits = compute_module_coverage(drug_gene_df, gene_metrics_df)
+
+    # aggregate per-drug network features
+    drug_scores = (
+        drug_gene_df.groupby("drug")
+        .agg(
+            n_targets_in_network=("gene", "nunique"),
+            n_hub_targets=("is_hub", "sum"),
+            sum_centrality=("combined_score", "sum"),
+            mean_centrality=("combined_score", "mean"),
+            max_centrality=("combined_score", "max"),
+            mean_degree=("degree", "mean"),
+            mean_betweenness=("betweenness", "mean"),
+            mean_closeness=("closeness", "mean")
+        )
+        .reset_index()
+    )
+
+    # add module-coverage summary
+    drug_scores = drug_scores.merge(module_cov, on="drug", how="left").fillna(0)
+
+    # features that will contribute to ranking
+    norm_cols = [
+        "n_targets_in_network",
+        "n_hub_targets",
+        "sum_centrality",
+        "mean_centrality",
+        "n_communities_hit",
+        "max_module_coverage",
+        "mean_module_coverage"
+    ]
+
+    # normalize all ranking features to 0-1
+    for col in norm_cols:
+        drug_scores[f"{col}_norm"] = minmax(drug_scores[col])
+
+    # final composite score
+    # You can tune these weights later if needed
+    drug_scores["drug_score"] = (
+        0.25 * drug_scores["n_hub_targets_norm"] +
+        0.20 * drug_scores["sum_centrality_norm"] +
+        0.15 * drug_scores["mean_centrality_norm"] +
+        0.15 * drug_scores["n_targets_in_network_norm"] +
+        0.15 * drug_scores["n_communities_hit_norm"] +
+        0.10 * drug_scores["max_module_coverage_norm"]
+    )
+
+    # rank from highest score to lowest
+    drug_scores = drug_scores.sort_values("drug_score", ascending=False).reset_index(drop=True)
+
+    return drug_scores, drug_module_hits
+
+
+# ------------------------------------------------------------
+# Main wrapper function for one disease
+#
+# Inputs:
+#   gene_metrics_file   -> disease-specific network output
+#   interactions_file   -> DGIdb interactions.tsv
+#   output_dir          -> where output files should go
+#   output_prefix       -> disease name prefix for saved files
+#
+# Outputs:
+#   *_drug_gene_interactions.csv
+#   *_drug_scores.csv
+#   *_drug_module_hits.csv
+# ------------------------------------------------------------
+def run_pipeline_for_disease(
+    gene_metrics_file,
+    interactions_file,
+    output_dir,
+    output_prefix,
+    gene_col="gene",
+    min_interaction_score=None
+):
+    # create output folder if it does not exist
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # load disease network gene metrics
+    gene_metrics_df = load_gene_metrics(gene_metrics_file, gene_col=gene_col)
+
+    # load DGIdb interactions
+    dgidb_df = load_dgidb_interactions(interactions_file)
+
+    # create disease-specific drug-gene table
+    drug_gene_df = prepare_drug_gene_interactions(
+        gene_metrics_df,
+        dgidb_df,
+        min_interaction_score=min_interaction_score
+    )
+
+    # rank drugs using centrality/module-based features
+    drug_scores_df, drug_module_hits_df = score_drugs(drug_gene_df, gene_metrics_df)
+
+    # define output files
+    drug_gene_file = output_dir / f"{output_prefix}_drug_gene_interactions.csv"
+    drug_scores_file = output_dir / f"{output_prefix}_drug_scores.csv"
+    drug_module_hits_file = output_dir / f"{output_prefix}_drug_module_hits.csv"
+
+    # save outputs
+    drug_gene_df.to_csv(drug_gene_file, index=False)
+    drug_scores_df.to_csv(drug_scores_file, index=False)
+    drug_module_hits_df.to_csv(drug_module_hits_file, index=False)
+
+    # print summary for user
+    print(f"Saved drug-gene interactions: {drug_gene_file}")
+    print(f"Saved drug scores: {drug_scores_file}")
+    print(f"Saved drug-module hits: {drug_module_hits_file}")
+    print(f"Network genes with DGIdb matches: {drug_gene_df['gene'].nunique() if not drug_gene_df.empty else 0}")
+    print(f"Ranked drugs: {len(drug_scores_df)}")
+
+
+# ------------------------------------------------------------
+# Example run
+# Change these file paths for each disease
+#
+# For example:
+# - Cardiovascular_Disease_gene_metrics_conf700_res1.0.csv
+# - Arthritis_gene_metrics_conf700_res1.0.csv
+# - T2DM_gene_metrics_conf700_res1.0.csv
+# ------------------------------------------------------------
+if __name__ == "__main__":
+    run_pipeline_for_disease(
+        gene_metrics_file="/Users/vineetpaliwal/NetMod-Repurposers/CardiovascularDisease/CardioVascular_Disease_gene_metrics_conf700.csv",
+        interactions_file="/PATH/TO/interactions.tsv",
+        output_dir="/PATH/TO/output",
+        output_prefix="Cardiovascular_Disease",
+        gene_col="gene",
+        min_interaction_score=None
+    )
